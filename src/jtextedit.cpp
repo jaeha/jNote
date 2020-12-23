@@ -112,7 +112,7 @@ void JTextEdit::dropEvent(QDropEvent *event)
 #endif
 
     QFileInfo fi(url);
-    if (textFiles.contains(fi.suffix())) {
+   /* if (textFiles.contains(fi.suffix())) {
         QMessageBox msgBox;
         msgBox.setText("Dropped text file.  Would you like to add as note or attachment ?");
         QPushButton *noteButton = msgBox.addButton(tr("As Note"), QMessageBox::ActionRole);
@@ -126,7 +126,7 @@ void JTextEdit::dropEvent(QDropEvent *event)
         if (msgBox.clickedButton() == (QAbstractButton *)cancelButton)
             return;
     }
-
+*/
     emit toDropFile(fi.absoluteFilePath());
 
     setBackgroundRole(QPalette::Dark);

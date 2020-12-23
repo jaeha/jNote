@@ -16,7 +16,7 @@
 #include <QSqlRecord>
 #include <QSqlField>
 #include <QComboBox>
-//#include "global.h"
+#include "global.h"
 
 /* BlackBerry
 #include <qobject.h>
@@ -32,8 +32,7 @@
 using namespace bb::cascades;
 */
 
-#define DB_VERSION      500
-#define DB_FILE         "data.jnote"
+#define DB_VERSION      600
 
 typedef QMap<int, QString> IdMap;
 typedef QMapIterator<int, QString> IdMapIterator;
@@ -41,6 +40,7 @@ typedef QMapIterator<int, QString> IdMapIterator;
 typedef struct Data {
     int id;
     QString note;
+    QString category;
     QString tags;
     QString attached;
     QString lastmodified;
@@ -62,20 +62,30 @@ public:
     QVariant record(QString table, int id, QString column);
     int desc2id(QString table, QString desc);
     bool update(QString table, int id, QString column, QString value);
+    int counter(QString table, QString where="");
     void close();
+    int dbversion() { return records("info", "db_version").first().toInt(); }
 
     /// jnote specific
-    bool createTable();
-    IdMap getTitles() { return recordMap("notes", "note"); }
-    IdMap findNotes(QString words) { return recordMap("notes", "note",\
-                                           QString("note like '%%1%'").arg(words)); }
-    void setNote(int id, QString text) { update("notes", id, "note", text); }
-    int insertEmptyNote() { return insert("notes", QStringList()<<""<<"1"<<""); }
-    QString getNote(int id) { return record("notes", id, "note").toString(); }
-    bool removeNote(int id) { return remove("notes", id); }
-    bool setAttach(int id, QString value) { return update("notes", id, "attached", value); }
-    QString getAttach(int id) { return record("notes", id, "attached").toString(); }
+    bool createDB(QString path);
+    bool upgrade(QString path);
+    bool import(QString path, QString category="");
 
+    IdMap getNotes(int cid) { return recordMap("notes", "note", QString("category_id=%1").arg(cid)); }
+    IdMap findNotes(QString words, int cid) { return recordMap("notes", "note", QString("note like '%%1%' AND category_id=%2").arg(words).arg(cid)); }
+    void setNote(int nid, QString text) { update("notes", nid, "note", text); }
+    void setNoteCategory(int nid, int cid) { update("notes", nid, "category_id", QString("%1").arg(cid)); }
+    int insertEmptyNote() { return insert("notes", QStringList()<<""<<"1"<<""<<""); }
+    QString getNote(int nid) { return record("notes", nid, "note").toString(); }
+    bool removeNote(int nid) { return remove("notes", nid); }
+    bool setAttach(int nid, QString value) { return update("notes", nid, "attached", value); }
+    QString getAttach(int nid) { return record("notes", nid, "attached").toString(); }
+    int counterNote(int cid) { return counter("notes", QString("category_id=%1").arg(cid)); }
+
+    IdMap getCategories() { return recordMap("category", "desc"); }
+    void setCategory(int cid, QString category) { update("category", cid, "desc", category); }
+    int insertNewCategory(QString category) { return insert("category", QStringList()<<category); }
+    bool removeCategory(int cid) { return remove("category", cid); }
 
 private:
     bool updateLastModified(QString table, int id);

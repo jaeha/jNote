@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QListWidgetItem>
 #include <QListWidget>
+#include <QList>
 
 class JListWidget : public QListWidget
 {
@@ -15,9 +16,10 @@ public:
     explicit JListWidget(QWidget *parent = nullptr);
     void updateAllData(IdMap map);
     void addData(int id, QString str);
-    void removeCurrentData();
+    void removeSelectedData();
     void updateCurrentData(QString str);
     int currentID();
+    QList<int> selectedData();
 
 signals:
     void toItemChanged(int);

@@ -10,7 +10,7 @@ class JAttachButton : public QPushButton
 {
         Q_OBJECT
 public:
-    explicit JAttachButton(QString attachpath, QWidget *parent = nullptr);
+    explicit JAttachButton(QWidget *parent = nullptr);
 private:
     QString m_attachpath;
     void mousePressEvent(QMouseEvent *e);
@@ -23,8 +23,9 @@ signals:
 
 public slots:
     void onOpen();
-    void onDelete();
+    void onHide();
     void onAttach(QString);
+    void onChangePath(QString);
 };
 
 #endif // JATTACHBUTTON_H

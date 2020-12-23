@@ -5,9 +5,10 @@
 
 JListWidget::JListWidget(QWidget *parent) : QListWidget(parent)
 {
-    setSelectionMode(QAbstractItemView::SingleSelection);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     setSelectionBehavior(QAbstractItemView::SelectRows);
     setEditTriggers(QAbstractItemView::NoEditTriggers);
+    setContextMenuPolicy(Qt::CustomContextMenu);
    /*
        QVBoxLayout *vbox = new QVBoxLayout();
        vbox->addWidget(m_list);
@@ -24,10 +25,24 @@ JListWidget::JListWidget(QWidget *parent) : QListWidget(parent)
 
 void JListWidget::onCurrentItemChanged(QListWidgetItem* newItem, QListWidgetItem* oldItem)
 {
-    if (newItem != NULL) {
+   // message(DEBUG, "JListWidget::onCurrentItemChanged()", QString("items: %1").arg(selectedItems().size()));
+
+    if (newItem == NULL) {
+        emit toItemChanged(NO_DATA);
+    } else {
         message(DEBUG, "onCurrentItemChanged()", "item changed");
         emit toItemChanged(newItem->data(LIST_KEY).toInt());
     }
+}
+
+QList<int> JListWidget::selectedData()
+{
+    QList<int> selected;
+    foreach (QModelIndex index, selectedIndexes()){
+        selected.append(index.data(LIST_KEY).toInt());
+    }
+
+    return selected;
 }
 
 void JListWidget::updateAllData(IdMap map)
@@ -59,8 +74,9 @@ void JListWidget::addData(int id, QString str)
     setCurrentItem(item);
 }
 
-void JListWidget::removeCurrentData()
+void JListWidget::removeSelectedData()
 {
+    message(DEBUG, "removeSelectedData()", QString("remove: %1").arg(currentRow()));
     takeItem(currentRow());
 }
 
@@ -77,5 +93,8 @@ void JListWidget::onFontResize(int fontsize)
 
 int JListWidget::currentID()
 {
-    return currentItem()->data(LIST_KEY).toInt();
+    if (currentItem())
+        return currentItem()->data(LIST_KEY).toInt();
+    else
+        return NO_DATA;
 }

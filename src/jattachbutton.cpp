@@ -5,19 +5,19 @@
 #include <QMimeData>
 #include <QFileInfo>
 
-JAttachButton::JAttachButton(QString attachpath, QWidget *parent) : QPushButton(parent)
+JAttachButton::JAttachButton(QWidget *parent) : QPushButton(parent)
 {
-    m_attachpath = attachpath;
     hide();
 
     connect(this, SIGNAL(clicked()), this, SLOT(onOpen()));
-    connect(parent, SIGNAL(toDeleteAttach()), this, SLOT(onDelete()));
+    connect(parent, SIGNAL(toHideAttachIcons()), this, SLOT(onHide()));
     connect(parent, SIGNAL(toAttachFile(QString)), this, SLOT(onAttach(QString)));
+    connect(parent, SIGNAL(toChangeAttachpath(QString)), this, SLOT(onChangePath(QString)));
 }
 
 void JAttachButton::onOpen()
 {
-    emit toAttachOpen(text());
+    emit toAttachOpen(m_attachpath + text());
 }
 
 void JAttachButton::onAttach(QString file)
@@ -28,10 +28,15 @@ void JAttachButton::onAttach(QString file)
     show();
 }
 
-void JAttachButton::onDelete()
+void JAttachButton::onHide()
 {
     setText("");
     hide();
+}
+
+void JAttachButton::onChangePath(QString path)
+{
+    m_attachpath = path;
 }
 
 void JAttachButton::mousePressEvent(QMouseEvent *e)
@@ -59,7 +64,7 @@ void JAttachButton::mouseMoveEvent(QMouseEvent *e)
         return;
 
     QFileInfo fi(m_attachpath + text());
-    qDebug() << fi.absoluteFilePath();
+ //   qDebug() << fi.absoluteFilePath();
     QUrl url = QUrl::fromLocalFile(fi.absoluteFilePath());
 
     QMimeData *mimeData = new QMimeData;
@@ -67,8 +72,6 @@ void JAttachButton::mouseMoveEvent(QMouseEvent *e)
 
     QDrag *drag = new QDrag(this);
     drag->setMimeData(mimeData);
-   // drag->exec(Qt::CopyAction | Qt::MoveAction, Qt::CopyAction);
-  // drag->exec(Qt::CopyAction, Qt::CopyAction);
     Qt::DropAction dropAction = drag->exec(Qt::CopyAction);
 
     QPushButton::mouseMoveEvent(e);

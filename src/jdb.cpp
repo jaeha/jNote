@@ -6,28 +6,67 @@
  *      version: 2.0
  */
 
-#include "JDB.h"
+#include "jdb.h"
 #include "global.h"
 
 JDB::JDB(QObject *parent) : QObject(parent)
 {
 }
 
+bool JDB::upgrade(QString path)
+{
+    message(DEBUG, "JDB", "upgrade(): " + path);
+
+    QString oldPath = path + ".before_upgrade";
+
+    if (!QFile::rename(path, oldPath)) {
+        message(ERROR, "JDB", "Failed to rename current db to " + oldPath);
+        return false;
+    }
+
+    // create new db
+    createDB(path);
+
+    if (import(oldPath, "upgraded"))
+        message(DEBUG, "JDB", "Upgrade was done successfully!");
+
+    return true;
+}
+
+// import db
+bool JDB::import(QString path, QString category)
+{
+    message(DEBUG, "JDB", "import():" + path);
+
+    //db1: source
+    QSqlDatabase sourceDB = QSqlDatabase::addDatabase("QSQLITE","sourceDB");
+    sourceDB.setDatabaseName(path);
+    sourceDB.open();
+    QSqlQuery query_sourceDB(sourceDB);
+
+    if (category.isEmpty())
+        category = "imported";
+    int cid = insertNewCategory(category);
+
+    query_sourceDB.exec(QString("SELECT note, tag, attached FROM notes;"));
+    while (query_sourceDB.next()) {
+        insert("notes", QStringList() << query_sourceDB.value(0).toString()\
+                                       << QString("%1").arg(cid)\
+                                       << query_sourceDB.value(1).toString()\
+                                       << query_sourceDB.value(2).toString());
+    }
+
+    message(DEBUG, "JDB", "import was done successfully!");
+
+    sourceDB.close();
+    sourceDB.removeDatabase("sourceDB");
+
+    return true;
+}
+
 bool JDB::open(QString path)
 {
-    bool isNewDB = false;
-
-    if (path.isEmpty())
-        path = BASE_PATH;
-
-    path = path + "/" + DB_FILE;
-
     message(DEBUG, "JDB", "open() "+ path);
-
-    if (!QFile(path).exists()) {
-       message(INFO, "JDB", QString("New db will be created, %1").arg(path));
-       isNewDB = true;
-    }
 
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
     db.setDatabaseName(path);
@@ -36,18 +75,6 @@ bool JDB::open(QString path)
        message(ERROR, "JDB", QString("failed open %1 due to %2").arg(path).arg(db.lastError().text()));
        return false;
     }
-
-    if (isNewDB) {
-        if (!createTable()) {
-            removeFile(path);
-            return false;
-        }
-    }
-
-    // remove existing backup file and copy
-    QString backupFile = QString("%1.bak").arg(path);
-    removeFile(backupFile);
-    copyFile(path, backupFile);
 
     message(DEBUG, "JDB", QString("%1 opened successfully.").arg(path));
     return true;
@@ -159,6 +186,21 @@ IdMap JDB::recordMap(QString table, QString column, QString where)
     return map;
 }
 
+int JDB::counter (QString table, QString where)
+{
+    QSqlQuery query;
+    QString sql = QString("SELECT count(*) FROM %1").arg(table);
+    if (!where.isEmpty())
+            sql += QString(" WHERE %1").arg(where);
+
+    qDebug() << sql;
+    query.exec(sql);
+    query.first();
+    if (query.isValid())
+        return query.value(0).toInt();
+    else
+        return NO_DATA;
+}
 
 int JDB::desc2id(QString table, QString desc)
 {
@@ -184,8 +226,11 @@ bool JDB::updateLastModified(QString table, int id)
 
 void JDB::close()
 {
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
-    db.close();
+    QSqlDatabase db = QSqlDatabase::database();
+    if (db.isOpen())
+        db.close();
+
+    db.removeDatabase(db.connectionName());
 }
 
 JDB::~JDB()
@@ -195,15 +240,21 @@ JDB::~JDB()
 
 /// jnote specific
 
-bool JDB::createTable()
+bool JDB::createDB(QString path)
 {
-    QString sqlNoteTable = "CREATE TABLE notes (id INTEGER primary key, note TEXT, " \
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
+    db.setDatabaseName(path);
+    db.open();
+
+    // create tables
+    QString sqlNoteTable = "CREATE TABLE notes (id INTEGER primary key, note TEXT, category_id int, " \
                            "tag VARCHAR(256), attached VARCHAR(256), lastmodified DATE);";
+    QString sqlCategoryTable = "CREATE TABLE category (id INTEGER primary key, desc varchar(128), lastmodified DATE);";
     QString sqlInfoTable = "CREATE TABLE info (app_title VARCHAR(16), db_version INTEGER, db_created DATE);";
     QString sqlInfoInsert = QString("INSERT INTO info (app_title, db_version, db_created) \
                                         VALUES ('%1', %2, DATETIME('NOW'));").arg(APP_TITLE).arg(DB_VERSION);
 
-    if (!execQuery(sqlNoteTable)) {
+    if (!execQuery(sqlNoteTable) || !execQuery(sqlCategoryTable)) {
         message(ERROR, "createTable()", "Failed create data table.");
         return false;
     }
@@ -212,6 +263,6 @@ bool JDB::createTable()
         message(ERROR, "createTable()", "Failed create info table.");
         return false;
     }
-
+ //   db.close();
     return true;
 }

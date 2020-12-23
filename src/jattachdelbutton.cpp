@@ -13,12 +13,11 @@ JAttachDelButton::JAttachDelButton(QWidget *parent) : QPushButton(parent)
 
     connect(this, SIGNAL(clicked()), this, SLOT(onDelete()));
     connect(parent, SIGNAL(toAttachFile(QString)), this, SLOT(onAttach(QString)));
-    connect(parent, SIGNAL(toDeleteAttach()), this, SLOT(onHide()));
+    connect(parent, SIGNAL(toHideAttachIcons()), this, SLOT(onHide()));
 }
 
 void JAttachDelButton::onDelete()
 {
-    hide();
     emit toDeleteAttach();
 }
 

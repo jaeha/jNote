@@ -5,20 +5,21 @@
 #include <QDebug>
 #include <QMessageBox>
 #include <QFile>
+#include <QDir>
 #include <QColor>
 
 #define PROGRAMMER      "Jaeha Lee"
 #define COMPANY         "JTN Co."
 #define COPYWRITE       "Copyright 2018 JTN Co. Ltd.. All rights reserved."
-
 #define APP_TITLE       "JNote"
-#define APP_VERSION     "3.1.1"
-#define BUILT_DATE      "Tuesday, 2nd Apr 2019"
-
+#define APP_VERSION     "3.2"
+#define BUILT_DATE      "Monday, 25th November 2019"
+//#define SP     QDir::separator()
+#define SP          "/"
 #define BASE_PATH   QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)\
-                    .append("/").append(APP_TITLE)
-//#define ATTACH_PATH BASE_PATH.append("attach/")
-#define ATTACH_PATH "attach/"
+                    + SP + QString(APP_TITLE) + SP
+#define ATTACH_DIR "attach"
+#define DB_FILE     "data.jnote"
 
 #define MAIN_DIALOG_SIZE    QSize(500,800)
 #define ICON_SIZE   QSize(24, 24)
@@ -38,7 +39,6 @@
 
 #define INT2STR(i)      QString::number(i)
 #define FIRSTLINE(s)    s.split("\n").at(0)
-
 
 enum LogLevel {ERROR, INFO, DEBUG};
 inline void message(LogLevel level, const QString &title, const QString &msg="")
@@ -78,22 +78,45 @@ inline void writeFile(QString path, const char* data)
     file.close();
 }
 
-inline void removeFile(QString path)
+inline bool removeFile(QString path)
 {
     if (!QFile(path).exists()) {
         message(DEBUG, "removeFile()", path + " is not exist.");
-        return;
+        return false;
     }
-    QFile(path).remove();
+    return QFile(path).remove();
 }
 
-inline void copyFile(QString source, QString target)
+inline bool copyFile(QString sPath, QString tPath)
 {
-    if (!QFile(source).exists()) {
-        message(DEBUG, "copyFile()", source + " is not exist.");
-        return;
+    if (!QFile(sPath).exists()) {
+        message(DEBUG, "global", "copyFile(): file is not exist!");
+        return false;
     }
-    QFile(source).copy(target);
+
+    QFileInfo sf(sPath);
+
+    if (sf.isFile()) { // copy a single file
+        if (!QFile(tPath).exists())
+            QFile::copy(sPath, tPath);
+        else
+            message(DEBUG, "global", "copyFile(): file is already exist, " + tPath);
+    } else if (sf.isDir()) {  // copy all the files on the directory
+        QDir dir(sPath);
+        foreach (QString f, dir.entryList(QDir::Files)) {
+            QString tFile = tPath + SP +f;
+            qDebug() << tFile;
+            if (!QFile(tFile).exists())
+                QFile::copy(sPath + SP + f, tFile);
+        }
+    } else {
+        message(ERROR, "global", "copyFile() was failed from " + sPath + " to " + tPath);
+        return false;
+    }
+
+    message(DEBUG, "global", "copyFiles() completed successfully!");
+
+    return true;
 }
 
 

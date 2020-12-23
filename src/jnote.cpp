@@ -1,7 +1,8 @@
-#include "jnote.h"
+ #include "jnote.h"
 #include "jdb.h"
 #include "jattachbutton.h"
 #include "jattachdelbutton.h"
+#include "jsettingsdlg.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
@@ -16,48 +17,55 @@
 #include <QScrollArea>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QInputDialog>
 
 JDB db;
 
 JNote::JNote(QWidget *parent) : QWidget(parent)
 {
+    m_findwords="";
 }
 
-void JNote::doOpen(QString path)
+void JNote::open()
 {
-    // clean up
-    delete layout();
-    db.close();
-
-    m_basepath = path;
-
-    // create base path if it's not already exist
-    if (!QDir(basepath()).exists())
-            QDir().mkdir(basepath());
-    // attachment
-    if (!QDir(attachpath()).exists())
-            QDir().mkdir(attachpath());
-
-    if (!db.open(path))
-        message(ERROR, "JNote()", "Unable to open db!");
-
+    qDebug() << "JNote::open()";
     gui();
     readSettings();
-    loadTitleList();
-    emit toFontResize(m_fontsize);
-    setWindowTitle(QString("%1 v%2: %3").arg(APP_TITLE).arg(APP_VERSION).arg(basepath()));
 
-    //remove directory from attachments
-/*    IdMap map = db.recordMap("notes", "attached", "not attached=''");
-    IdMapIterator i(map);
-    while (i.hasNext()) {
-        i.next();
-        message(DEBUG, "attached", QString("%1 %2").arg(i.key()).arg(i.value()));
-        QFileInfo f(i.value());
-        message(DEBUG, "after", QString("%1 %2").arg(i.key()).arg(f.fileName()));
-        db.update("notes", i.key(), "attached", f.fileName());
+    if (m_basepath.isEmpty())
+        m_basepath = BASE_PATH;
+
+    qDebug() <<"m_basepath=" <<m_basepath << dbfile();
+
+    //create new db if it's not exist.
+    if (!QFile(dbfile()).exists()) {
+        db.createDB(dbfile());
+        QDir(m_basepath).mkdir(ATTACH_DIR);
     }
-*/
+    else {
+        // remove existing backup file and copy
+        QString backupFile = dbfile() + ".bak";
+        removeFile(backupFile);
+        copyFile(dbfile(), backupFile);
+        db.open(dbfile());
+    }
+
+    // if the db is old, upgrade it.
+    message(DEBUG, "JDB", QString("open() DB version: %1").arg(db.dbversion()));
+    if (db.dbversion() < DB_VERSION) {
+        message(DEBUG, "JDB", "DB upgrade...");
+        db.close();
+        if (!db.upgrade(dbfile())) {
+            message(ERROR, "JNote", "db upgrade was failed");
+            return;
+        }
+        message(INFO, "JNote", "DB upgraded successfully!");
+        db.open(dbfile());
+    }
+
+    loadData();
+    emit toFontResize(m_fontsize);
+    emit toChangeAttachpath(attachpath());
 }
 
 void JNote::gui()
@@ -65,6 +73,7 @@ void JNote::gui()
     m_splitter = new QSplitter();
     m_text = new JTextEdit("",this);
     m_titlelist = new JListWidget(this);
+    m_category = new JCategoryCB(this);
    // m_titlelist->setContextMenuPolicy(Qt::CustomContextMenu);
 
     QToolBar *toolbar = new QToolBar();
@@ -72,33 +81,42 @@ void JNote::gui()
 
     //left panel
     QWidget *leftwg = new QWidget();
-    QVBoxLayout *vbox = new QVBoxLayout();
-    vbox->addWidget(m_titlelist);
-    vbox->setMargin(0);
-    leftwg->setLayout(vbox);
+    QVBoxLayout *lvbox = new QVBoxLayout();
+    lvbox->addWidget(m_category);
+    lvbox->addWidget(m_titlelist);
+    lvbox->setMargin(0);
+    lvbox->setSpacing(5);
+    leftwg->setLayout(lvbox);
 
     // right panel
     QWidget *rightwg = new QWidget();
-    QVBoxLayout *rlayout = new QVBoxLayout;
-    rlayout->addWidget(m_text);
-    rlayout->setMargin(0);
-    rightwg->setLayout(rlayout);
+   // QLineEdit *titleEd = new QLineEdit();
+    QVBoxLayout *rvbox= new QVBoxLayout;
+  //  rvbox->addWidget(titleEd);
+    rvbox->addWidget(m_text);
+    rvbox->setMargin(1);
+    rvbox->setSpacing(1);
+    rightwg->setLayout(rvbox);
 
     m_splitter->addWidget(leftwg);
     m_splitter->addWidget(rightwg);
 
-    JAttachButton *attachbt = new JAttachButton(attachpath(), this);
+    JAttachButton *attachbt = new JAttachButton(this);
     JAttachDelButton *attachdelbt = new JAttachDelButton(this);
+    m_counter = new QLabel("");
+    m_counter->setMaximumHeight(attachdelbt->height());
+
     QHBoxLayout *hbox = new QHBoxLayout();
+    hbox->addWidget(m_counter, 0, Qt::AlignLeft);
     hbox->addStretch();
-    hbox->addWidget(attachdelbt);
-    hbox->addWidget(attachbt);
+    hbox->addWidget(attachdelbt, 0, Qt::AlignRight);
+    hbox->addWidget(attachbt, 0, Qt::AlignRight);
 
     QVBoxLayout *layout = new QVBoxLayout;
     layout->addWidget(toolbar);
     layout->addWidget(m_splitter);
-    layout->setMargin(2);
-    layout->setSpacing(2);
+    layout->setMargin(0);
+    layout->setSpacing(0);
     layout->addLayout(hbox);
 
     resize(MAIN_DIALOG_SIZE);
@@ -108,8 +126,11 @@ void JNote::gui()
     connect(m_text, SIGNAL(toChangedData(QString)), this, SLOT(onTextChanged(QString)));
     connect(m_text, SIGNAL(toDropFile(QString)), this, SLOT(onDropFile(QString)));
     connect(m_titlelist, SIGNAL(toItemChanged(int)), this, SLOT(onTitleSelected(int)));
-   // connect(m_titlelist, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(onTitleContextMenu(QPoint)));
-    connect(attachdelbt, SIGNAL(toDeleteAttach()), this, SLOT(onRemoveAttach()));
+    connect(m_titlelist, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(onTitleContextMenu(QPoint)));
+    connect(m_category, SIGNAL(toItemChanged(int)), this, SLOT(onCategoryChanged(int)));
+    connect(m_category, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(onCategoryContextMenu(QPoint)));
+
+    connect(attachdelbt, SIGNAL(toDeleteAttach()), this, SLOT(onDeleteAttach()));
     connect(attachbt, SIGNAL(toAttachOpen(QString)), this, SLOT(onAttachOpen(QString)));
 }
 
@@ -125,10 +146,6 @@ void JNote::menu(QToolBar *toolbar)
     actRemove->setIcon(QIcon(":remove"));
     actRemove->setIconText(tr("Remove"));
 
-  //  QAction *actOpen = new QAction(this);
-  //  actOpen->setIcon(QIcon(":open"));
-  //  actOpen->setIconText(tr("Open"));
-
     QAction *actBigger = new QAction(this);
     actBigger->setIcon(QIcon(":bigger"));
     actBigger->setIconText(tr("Bigger"));
@@ -137,14 +154,18 @@ void JNote::menu(QToolBar *toolbar)
     actSmaller->setIcon(QIcon(":smaller"));
     actSmaller->setIconText(tr("Smaller"));
 
+    QAction *actSettings = new QAction(this);
+    actSettings->setIcon(QIcon(":settings"));
+    actSettings->setIconText(tr("Settings"));
+
     toolbar->addAction(actAdd);
     toolbar->addAction(actRemove);
     toolbar->addSeparator();
     toolbar->addAction(actBigger);
     toolbar->addAction(actSmaller);
     toolbar->addSeparator();
-  //  toolbar->addAction(actOpen);
-  //  toolbar->addSeparator();
+    toolbar->addAction(actSettings);
+    toolbar->addSeparator();
     toolbar->addWidget(new QLabel(tr("Find:")));
     toolbar->addWidget(m_find);
 
@@ -152,13 +173,54 @@ void JNote::menu(QToolBar *toolbar)
     connect(actRemove, SIGNAL(triggered()), this, SLOT(onRemoveNote()));
     connect(actBigger, SIGNAL(triggered()), this, SLOT(onFontBigger()));
     connect(actSmaller, SIGNAL(triggered()), this, SLOT(onFontSmaller()));
- //   connect(actOpen, SIGNAL(triggered()), this, SLOT(onOpen()));
+    connect(actSettings, SIGNAL(triggered()), this, SLOT(onSettings()));
+
     connect(m_find, SIGNAL(textChanged(QString)), this, SLOT(onFindNotes(QString)));
 }
 
-void JNote::loadTitleList()
+void JNote::loadData()
 {
-    m_titlelist->updateAllData(db.getTitles());
+    m_titlelist->updateAllData(db.getNotes(0));
+    m_category->updateAllData(db.getCategories());
+}
+
+void JNote::onSettings()
+{
+    message(DEBUG, "JNote", "onSettings()");
+
+    JSettingsDlg *dlg = new JSettingsDlg(this, m_basepath);
+    dlg->show();
+
+    connect(dlg, SIGNAL(toImportData(QString)), this, SLOT(onImportData(QString)));
+    connect(dlg, SIGNAL(toChangeBasepath(QString)), this, SLOT(onChangeBasepath(QString)));
+}
+
+void JNote::onImportData(QString path)
+{
+    // category will not be imported, and all data will be under new category, 'imported'.
+
+    QString importDB = path + SP + DB_FILE;
+    if (!QFile(importDB).exists()) {
+        message(ERROR, "JNote", importDB + " is not found!");
+        return;
+    }
+
+    if (copyFile(dbfile(), dbfile() + ".before_import"))
+        message(DEBUG, "JDB", "import() create backup:" + dbfile() + ".before_import");
+
+    if (db.import(importDB)) {
+        copyFile(path + SP + ATTACH_DIR, m_basepath + ATTACH_DIR);
+        loadData();
+        message(INFO, "JNote", "Import was completed successfully!");
+    }
+    else
+        message(ERROR, "JNote", "onImportData() import was failed!");
+}
+
+void JNote::onChangeBasepath(QString path)
+{
+    m_basepath = path;
+    message(INFO, "onChangeBasepath", "Changed base directory to " + path + " . Please copy all files into new directory and resatrt JNote!");
 }
 
 void JNote::onDropFile(QString path)
@@ -166,58 +228,155 @@ void JNote::onDropFile(QString path)
     message(DEBUG, "JNote()::onDropFile: ", path);
 
     QFileInfo fi(path);
+    QString newfile = attachpath() + SP + QString("%1_%2").arg(m_titlelist->currentID()).arg(fi.fileName());
 
-    if (fi.suffix() == "jnote") {
-        doOpen(fi.absolutePath());
+    if (QFile::copy(path, newfile)) {
+        QFileInfo fi2(newfile);
+        QString fn = fi2.fileName();
+        emit toAttachFile(fn);
+        db.setAttach(m_titlelist->currentID(), fn);
     } else {
-        QString newfile = QString("%1%2_%3").arg(attachpath()).arg(m_titlelist->currentID()).arg(fi.fileName());
-
-        if (QFile::copy(path, newfile)) {
-            QFileInfo fi2(newfile);
-            QString fn = fi2.fileName();
-            emit toAttachFile(fn);
-            db.setAttach(m_titlelist->currentID(), fn);
-        } else
-            message(ERROR, "JNote", QString("Failed to copy file from %1 to %2").arg(path).arg(newfile));
+        message(ERROR, "JNote", QString("Failed to copy file from %1 to %2").arg(path).arg(newfile));
     }
 }
 
-void JNote::onAttachOpen(QString file)
+void JNote::onAttachOpen(QString path)
 {
-    message(DEBUG, "onAttachOpen()", attachpath()+file);
-    QDesktopServices::openUrl(QUrl("file:///" + attachpath() + file, QUrl::TolerantMode));
+    message(DEBUG, "onAttachOpen()", path);
+    QDesktopServices::openUrl(QUrl("file:///" + path, QUrl::TolerantMode));
 }
 
-void JNote::onRemoveAttach()
+void JNote::onDeleteAttach()
 {
+    message(DEBUG,"JNote", "onDeleteAttach()");
+
     int id = m_titlelist->currentID();
     QString fn = attachpath() + db.getAttach(id);
+    qDebug() << "file remove: " << fn;
     QFile f(fn);
     if (f.remove()) {
         db.setAttach(id, "");
-        emit toDeleteAttach();
+        emit toHideAttachIcons();
     } else
         message(ERROR, "Remove attachment", "Failed to remove Attachment file, " + fn);
 }
 
 void JNote::onTitleContextMenu(const QPoint &pos)
 {
+    message(DEBUG, "onTitleContextMenu()", "move items to different category");
+
+   if (m_titlelist->currentID() > 0) {
+        // Handle global position
+        QPoint globalPos = m_titlelist->mapToGlobal(pos);
+        // Create menu and insert some actions
+        QMenu *menu = new QMenu();
+
+        IdMapIterator i(db.getCategories());
+        while (i.hasNext()) {
+            i.next();
+            if (i.value() == m_category->currentText()) // skipped current category!
+                continue;
+            QAction *action = new QAction(i.value());
+            action->setData(i.key());
+            menu->addAction(action);
+        }
+        connect(menu, SIGNAL(triggered(QAction*)), this, SLOT(onTitleChangeCategory(QAction *)));
+
+        // Show context menu at handling position
+        menu->exec(globalPos);
+   }
+}
+
+void JNote::onCategoryContextMenu(const QPoint &pos)
+{
+    message(DEBUG, "onCategoryContextMenu()", "change category");
+
     // Handle global position
-    QPoint globalPos = m_titlelist->mapToGlobal(pos);
+    QPoint globalPos = m_category->mapToGlobal(pos);
 
     // Create menu and insert some actions
-    QMenu menu;
-    menu.addAction("Change Category", this, SLOT(onTitleChangeCategory()));
+    QMenu *menu = new QMenu();
+    menu->addSection("Category");
+    menu->addAction("New", this, SLOT(onNewCategory()));
+    menu->addAction("Rename", this , SLOT(onRenameCategory()));
+    menu->addAction("Delete", this, SLOT(onDeleteCategory()));
 
     // Show context menu at handling position
-    menu.exec(globalPos);
+    menu->exec(globalPos);
+}
+
+void JNote::onCategoryChanged(int cid)
+{
+    message(DEBUG, "onCategoryChanged()", "start..");
+
+    m_text->updateData("");
+    m_titlelist->updateAllData(db.findNotes(m_findwords, cid));
+
+    m_counter->setText(QString(" Records: %1").arg(db.counterNote(cid)));
+}
+
+void JNote::onTitleChangeCategory(QAction *action)
+{
+    message(DEBUG, "onTitleChangeCategory()", QString("action->text():%1").arg(action->text()));
+
+    foreach (int nid, m_titlelist->selectedData()) {
+       db.setNoteCategory(nid,  action->data().toInt());
+       m_titlelist->removeSelectedData(); // remove from title list
+    }
+}
+
+void JNote::onNewCategory()
+{
+    bool ok;
+    QString newCategory = QInputDialog::getText(this, tr("Cagtegory"),
+                                             tr("New Category:"), QLineEdit::Normal,
+                                             "", &ok);
+    if (ok && !newCategory.isEmpty()) {
+        int cid = db.insertNewCategory(newCategory);
+    }
+
+    m_category->updateAllData(db.getCategories());
+    m_category->setCurrentText(newCategory);
+}
+
+void JNote::onRenameCategory()
+{
+    bool ok;
+    QString renCategory = QInputDialog::getText(this, tr("Cagtegory"),
+                                            QString("Rename Category(%1):").arg(m_category->currentText()), \
+                                            QLineEdit::Normal,"", &ok);
+
+    if (ok && !renCategory.isEmpty()) {
+        int cid = m_category->currentData().toInt();
+        db.setCategory(cid, renCategory);
+        db.setNoteCategory(m_titlelist->currentID(), cid);
+    }
+
+    m_category->updateAllData(db.getCategories());
+    m_category->setCurrentText(renCategory);
+}
+
+void JNote::onDeleteCategory()
+{
+    int cid = m_category->currentData().toInt();
+    if (db.getNotes(cid).size() > 0) {
+        message(ERROR, "Delete Category", "Unable to delete Category if there is any note!");
+        return;
+    }
+
+   if (db.removeCategory(cid))
+        m_category->updateAllData(db.getCategories());
+   else
+       message(ERROR, "onDeleteCategory()", "Failed to delete category, " + m_category->currentText());
 }
 
 void JNote::onAddNote()
 {
     message(DEBUG, "onAddData()", "adding data..");
 
-    m_titlelist->addData(db.insertEmptyNote(), "");
+    int nid = db.insertEmptyNote();
+    m_titlelist->addData(nid, "");
+    db.setNoteCategory(nid, m_category->currentID());
     m_text->setFocus();
 }
 
@@ -225,8 +384,10 @@ void JNote::onTitleSelected(int id)
 {
     message(DEBUG, "onTitleSelected()", QString("id = %1").arg(id));
 
-    if (id < 0)
+    if (id == NO_DATA) {
+        m_text->updateData("");
         return;
+    }
 
     m_text->updateData(db.getNote(id), m_find->text());
     QString f = db.getAttach(id);
@@ -234,7 +395,7 @@ void JNote::onTitleSelected(int id)
         toAttachFile(f);
     }
     else
-        emit toDeleteAttach();
+        emit toHideAttachIcons();
 }
 
 
@@ -250,7 +411,7 @@ void JNote::onRemoveNote()
 
     int id = m_titlelist->currentID();
     if (id == NO_DATA) {
-        message(ERROR, "Rome Note", "No data was selected!");
+        message(ERROR, "Remove Note", "No data was selected!");
         return;
     }
 
@@ -259,18 +420,15 @@ void JNote::onRemoveNote()
                          QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
     if (button == QMessageBox::Yes) {
         if (!db.getAttach(id).isEmpty())
-            onRemoveAttach();
+            onDeleteAttach();
         if (db.removeNote(id)) {
-            m_titlelist->takeItem(m_titlelist->currentRow());
+            m_titlelist->removeSelectedData();
             if (!db.getAttach(id).isEmpty())
-                onRemoveAttach();
+                onDeleteAttach();
         }
         else
             message(ERROR, "Remove Note", "Failed to remove note!");
     }
-
-    if (m_titlelist->count() == 0)
-        m_text->updateData("");
 }
 
 void JNote::onFontBigger()
@@ -305,8 +463,9 @@ void JNote::onOpen()
 
 void JNote::onFindNotes(QString words)
 {
+    m_findwords = words;
     m_text->updateData("");
-    m_titlelist->updateAllData(db.findNotes(words));
+    m_titlelist->updateAllData(db.findNotes(words, m_category->currentID()));
 }
 
 void JNote::writeSettings()
@@ -317,6 +476,7 @@ void JNote::writeSettings()
     settings.setValue("geometry", saveGeometry());
     settings.setValue("splitter", m_splitter->saveState());
     settings.setValue("fontsize", m_fontsize);
+    settings.setValue("basepath", m_basepath);
     settings.endGroup();
 }
 
@@ -328,6 +488,7 @@ void JNote::readSettings()
     m_splitter->restoreState(settings.value("splitter").toByteArray());
     int fontsize = settings.value("fontsize").toInt();
     m_fontsize = (fontsize < FONT_DEFAULT_SIZE) ? FONT_DEFAULT_SIZE : fontsize;
+    m_basepath = settings.value("basepath").toString();
     settings.endGroup();
 }
 

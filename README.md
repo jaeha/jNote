@@ -1,4 +1,4 @@
-# JNote v3.1.1
+# JNote v3.2
 
 Simple note application in Qt and SQLite.  Programmed by Jaeha Lee on Apr 2019.
 <p>
@@ -13,8 +13,8 @@ Simple note application in Qt and SQLite.  Programmed by Jaeha Lee on Apr 2019.
 <p>
 
 ## Binary Installation
-For Mac, download JNote311.dmg, and copy to Application.
-For Windows, Download JNote311.zip and extract into any folder.
+For Mac, download jNote32.dmg, and copy to Application.
+For Windows, download jNote32-static.zip(single file) or -x86-dynamic(shared lib) and extract into any folder.
 <p>
 ~/Documents/JNote will be default location for the JNote data.
 <p>
@@ -24,7 +24,7 @@ Download all the files under 'src', and open the JNote.pro from Qt Creator and c
 <p>
   
 ## Usage
-![JNote v3.1](docs/jnote_main_screen.png)
+![JNote v3.2](docs/jnote_main_screen.png)
 
 - To add new note, just click add button and start to write on right text area.  All changes will be saved automatically.
 - Remove button will remove current note.
