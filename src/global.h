@@ -7,26 +7,30 @@
 #include <QFile>
 #include <QDir>
 #include <QColor>
+#include <QSettings>
 
 #define PROGRAMMER      "Jaeha Lee"
 #define COMPANY         "JTN Co."
 #define COPYWRITE       "Copyright 2018 JTN Co. Ltd.. All rights reserved."
 #define APP_TITLE       "JNote"
-#define APP_VERSION     "3.2"
-#define BUILT_DATE      "Monday, 25th November 2019"
+#define APP_VERSION     "4.0"
+#define BUILT_DATE      "Thursday, 26th August 2021"
 //#define SP     QDir::separator()
 #define SP          "/"
 #define BASE_PATH   QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)\
                     + SP + QString(APP_TITLE) + SP
-#define ATTACH_DIR "attach"
-#define DB_FILE     "data.jnote"
+#define ATTACH_DIR  "attach"
+#define MEMO_DIR    "memo"
+#define DB_FILE     "jnote.db"
 
 #define MAIN_DIALOG_SIZE    QSize(500,800)
 #define ICON_SIZE   QSize(24, 24)
 #define DATE_LONG       "yyyy-MM-dd hh:mm:ss"
 #define DATE_SHORT      "yyyy-MM-dd"
 #define DATE_YYMM       "yyyy-MM"
+#define DATE_LONG2      "yyyy-MM-dd hhmmss"
 #define DATE_MONTHYEAR  "MMMM yyyy"
+
 
 #define FONT_DEFAULT_SIZE       12
 #define FONT_SIZE_MAX           100
@@ -105,7 +109,7 @@ inline bool copyFile(QString sPath, QString tPath)
         QDir dir(sPath);
         foreach (QString f, dir.entryList(QDir::Files)) {
             QString tFile = tPath + SP +f;
-            qDebug() << tFile;
+           // qDebug() << tFile;
             if (!QFile(tFile).exists())
                 QFile::copy(sPath + SP + f, tFile);
         }
@@ -117,6 +121,18 @@ inline bool copyFile(QString sPath, QString tPath)
     message(DEBUG, "global", "copyFiles() completed successfully!");
 
     return true;
+}
+
+inline void writeSettings(QString key, QVariant value)
+{
+    QSettings s(COMPANY, APP_TITLE);
+    s.setValue(key, value);
+}
+
+inline QVariant readSettings(QString key)
+{
+    QSettings s(COMPANY, APP_TITLE);
+    return s.value(key);
 }
 
 

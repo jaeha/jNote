@@ -13,57 +13,6 @@ JDB::JDB(QObject *parent) : QObject(parent)
 {
 }
 
-bool JDB::upgrade(QString path)
-{
-    message(DEBUG, "JDB", "upgrade(): " + path);
-
-    QString oldPath = path + ".before_upgrade";
-
-    if (!QFile::rename(path, oldPath)) {
-        message(ERROR, "JDB", "Failed to rename current db to " + oldPath);
-        return false;
-    }
-
-    // create new db
-    createDB(path);
-
-    if (import(oldPath, "upgraded"))
-        message(DEBUG, "JDB", "Upgrade was done successfully!");
-
-    return true;
-}
-
-// import db
-bool JDB::import(QString path, QString category)
-{
-    message(DEBUG, "JDB", "import():" + path);
-
-    //db1: source
-    QSqlDatabase sourceDB = QSqlDatabase::addDatabase("QSQLITE","sourceDB");
-    sourceDB.setDatabaseName(path);
-    sourceDB.open();
-    QSqlQuery query_sourceDB(sourceDB);
-
-    if (category.isEmpty())
-        category = "imported";
-    int cid = insertNewCategory(category);
-
-    query_sourceDB.exec(QString("SELECT note, tag, attached FROM notes;"));
-    while (query_sourceDB.next()) {
-        insert("notes", QStringList() << query_sourceDB.value(0).toString()\
-                                       << QString("%1").arg(cid)\
-                                       << query_sourceDB.value(1).toString()\
-                                       << query_sourceDB.value(2).toString());
-    }
-
-    message(DEBUG, "JDB", "import was done successfully!");
-
-    sourceDB.close();
-    sourceDB.removeDatabase("sourceDB");
-
-    return true;
-}
-
 bool JDB::open(QString path)
 {
     message(DEBUG, "JDB", "open() "+ path);
@@ -92,16 +41,22 @@ bool JDB::execQuery(QString sql)
     return true;
 }
 
-int JDB::insert(QString table, QStringList list)
+int JDB::insert(QString table, QStringList list, bool isAutoID)
 {
     int lastID = NO_DATA;
     QSqlQuery query;
-    QString smt = QString(tr("INSERT INTO %1 VALUES(NULL, %2 DATETIME('NOW'));").arg(table).arg(QString("?,").repeated(list.size())));
+    QString smt;
+    if (isAutoID)
+        smt = QString(tr("INSERT INTO %1 VALUES(NULL, %2 DATETIME('NOW'));").arg(table).arg(QString("?,").repeated(list.size())));
+    else
+        smt = QString(tr("INSERT INTO %1 VALUES(%2 DATETIME('NOW'));").arg(table).arg(QString("?,").repeated(list.size())));
 
     query.prepare(smt);
     for (int i=0; i<list.size(); i++) {
             query.addBindValue(list[i]);
     }
+
+   // qDebug() << "insert() " << smt;
 
     if (query.exec())
         lastID = query.lastInsertId().toInt();
@@ -114,11 +69,12 @@ int JDB::insert(QString table, QStringList list)
 
 bool JDB::remove(QString table, int id)
 {
+    qDebug() << "JDB::remove(): " << id;
     QString query = QString("DELETE FROM %1 WHERE id = %2").arg(table).arg(id);
     return execQuery(query);
 }
 
-bool JDB::update(QString table, int id, QString column, QString value)
+bool JDB::update(QString table, int id, QString column, QVariant value, bool updateTime)
 {
     if (id < 0) {
             message(ERROR, "JDB", QString("id(%1) is invalid.").arg(id));
@@ -126,7 +82,10 @@ bool JDB::update(QString table, int id, QString column, QString value)
     }
 
     QSqlQuery query;
-    QString sql = QString("UPDATE %1 SET %2 = :value, lastmodified = DATETIME('NOW') WHERE id = :id").arg(table).arg(column);
+    QString sql = QString("UPDATE %1 SET %2 = :value").arg(table).arg(column);
+    if (updateTime)
+        sql = sql + QString(", lastmodified = DATETIME('NOW')");
+    sql = sql + QString(" WHERE id = :id");
 
     query.prepare(sql);
     query.bindValue(":id", id);
@@ -193,7 +152,6 @@ int JDB::counter (QString table, QString where)
     if (!where.isEmpty())
             sql += QString(" WHERE %1").arg(where);
 
-    qDebug() << sql;
     query.exec(sql);
     query.first();
     if (query.isValid())
@@ -224,6 +182,19 @@ bool JDB::updateLastModified(QString table, int id)
     return execQuery(sql);
 }
 
+int JDB::removeDuplicated(QString table, QString column)
+{
+    QString where = QString("rowid NOT IN (SELECT min(rowid) FROM %1 GROUP BY %2)")
+                            .arg(table).arg(column);
+    int countDuplicated = counter("notes", where);
+    QString sql = QString("DELETE FROM %1 WHERE %2").arg(table).arg(where);
+
+    if (execQuery(sql))
+        return countDuplicated;
+    else
+        return NO_DATA;
+}
+
 void JDB::close()
 {
     QSqlDatabase db = QSqlDatabase::database();
@@ -240,7 +211,7 @@ JDB::~JDB()
 
 /// jnote specific
 
-bool JDB::createDB(QString path)
+bool JDB::createDB(QString path, bool withDefault)
 {
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
     db.setDatabaseName(path);
@@ -248,13 +219,16 @@ bool JDB::createDB(QString path)
 
     // create tables
     QString sqlNoteTable = "CREATE TABLE notes (id INTEGER primary key, note TEXT, category_id int, " \
-                           "tag VARCHAR(256), attached VARCHAR(256), lastmodified DATE);";
+                           "tag VARCHAR(256), lastmodified DATE);";
     QString sqlCategoryTable = "CREATE TABLE category (id INTEGER primary key, desc varchar(128), lastmodified DATE);";
+    QString sqlAttachmentTable = "CREATE TABLE attachment (id INTEGER primary key, filename varchar(256), note_id INTEGER, lastmodified DATE);";
     QString sqlInfoTable = "CREATE TABLE info (app_title VARCHAR(16), db_version INTEGER, db_created DATE);";
     QString sqlInfoInsert = QString("INSERT INTO info (app_title, db_version, db_created) \
                                         VALUES ('%1', %2, DATETIME('NOW'));").arg(APP_TITLE).arg(DB_VERSION);
 
-    if (!execQuery(sqlNoteTable) || !execQuery(sqlCategoryTable)) {
+    if (!execQuery(sqlNoteTable) ||
+        !execQuery(sqlCategoryTable) ||
+        !execQuery(sqlAttachmentTable )) {
         message(ERROR, "createTable()", "Failed create data table.");
         return false;
     }
@@ -263,6 +237,104 @@ bool JDB::createDB(QString path)
         message(ERROR, "createTable()", "Failed create info table.");
         return false;
     }
+
+    //default
+    if (withDefault) {
+        insertCategory("Presonal");
+        insertCategory("Work");
+    }
  //   db.close();
     return true;
+}
+
+bool JDB::upgrade(QString path)
+{
+    message(DEBUG, "JDB", "upgrade(): " + path);
+
+    QString oldPath = path + ".before_upgrade";
+
+    if (!QFile::rename(path, oldPath)) {
+        message(ERROR, "JDB", "Failed to rename current db to " + oldPath);
+        return false;
+    }
+
+    // this upgrade is only for previous version 3.2 (DB=600)
+
+    // create new db
+    createDB(path, false);
+
+    QSqlDatabase odb = QSqlDatabase::addDatabase("QSQLITE","oldDB");
+    odb.setDatabaseName(oldPath);
+    odb.open();
+    QSqlQuery query(odb);
+
+    // category
+    query.exec(QString("SELECT id, desc, lastmodified FROM category;"));
+    while (query.next()) {
+        int id = query.value(0).toInt();
+        insert("category", QStringList()<<INT2STR(id)
+                            <<query.value(1).toString(), false);
+        update("category", id, "lastmodified", query.value(2).toString(), false);
+    }
+
+    // notes and attachments
+    query.exec(QString("SELECT id, note, category_id, tag, attached, lastmodified FROM notes;"));
+    while (query.next()) {
+        int id = query.value(0).toInt();
+        insert("notes", QStringList()<<INT2STR(id)
+                            <<query.value(1).toString()
+                            <<query.value(2).toString()
+                            <<query.value(3).toString(), false);
+        update("notes", id, "lastmodified", query.value(5).toString(), false);
+
+        QString attachment = query.value(4).toString();
+        if (!attachment.isEmpty())
+            insertAttachment(attachment, id);
+    }
+
+    return true;
+}
+
+// import db
+int JDB::import(QString path)
+{
+    message(DEBUG, "JDB", "import():" + path);
+
+    // create temporary table for ids
+    QString sqlTempIds = "CREATE TABLE tempids (id INTEGER, newid INTEGER, lastmodified DATE);";
+    execQuery(sqlTempIds);
+
+    int countInserted = 0;
+
+    QSqlDatabase idb = QSqlDatabase::addDatabase("QSQLITE","importDB");
+    idb.setDatabaseName(path);
+    idb.open();
+    QSqlQuery query(idb);
+
+    // DB=600
+   query.exec(QString("SELECT n.id, c.desc, n.note, n.tag, n.lastmodified FROM notes n JOIN category c \
+                                        ON n.category_id=c.id"));
+    while (query.next()) {
+    QString cat = "imported-" + query.value(1).toString();
+        int cid = desc2id("category", cat);
+        if (cid <= 0)
+            cid = insertCategory(cat);
+        int newID = insert("notes", QStringList()<<query.value(2).toString()
+                            <<INT2STR(cid)<<query.value(3).toString());
+        if (newID > 0) {
+            update("notes", newID, "lastmodified", query.value(3).toString());
+            insert("tempids", QStringList()<<query.value(0).toString()<<INT2STR(newID), false);
+            countInserted++;
+        }
+    }
+
+    // attchments
+    query.exec(QString("SELECT filename, note_id, lastmodified FROM attachment"));
+    while (query.next()) {
+        QString newID = record("tempids", query.value(1).toInt(), "newid").toString();
+        insert("attachment", QStringList()<<query.value(0).toString()<<newID);
+    }
+
+    execQuery("drop table tempids");
+    return countInserted;
 }

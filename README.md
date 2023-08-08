@@ -1,4 +1,6 @@
-# JNote v3.2
+# JNote v4.0
+
+Document from v3.2
 
 Simple note application in Qt and SQLite.  Programmed by Jaeha Lee on Apr 2019.
 <p>

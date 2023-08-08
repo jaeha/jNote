@@ -1,13 +1,14 @@
 #include "jtextedit.h"
-#include "jsearchdlg.h"
+#include "searchdlg.h"
 #include <QDragEnterEvent>
 #include <QMimeData>
 #include <QFileInfo>
 #include <QFile>
 #include <QShortcut>
 
-JTextEdit::JTextEdit(QString data, QWidget *parent) : QTextEdit(parent)
+JTextEdit::JTextEdit(QString filename, QString data, QWidget *parent) : QTextEdit(parent)
 {
+    m_filename = filename;
     setPlainText(data);
 
     setAcceptDrops(true);
@@ -44,9 +45,14 @@ void JTextEdit::findString(QString str, QColor color)
     setExtraSelections(foundList);
 }
 
+void JTextEdit::onFindText(QString text)
+{
+    findString(text, QColor("darkCyan"));
+}
+
 void JTextEdit::onSearchOpen()
 {
-    JSearchDlg *dlg = new JSearchDlg;
+    SearchDlg *dlg = new SearchDlg;
     dlg->show();
 
     connect(dlg, SIGNAL(toSearch(QString)), this, SLOT(onSearchInText(QString)));
@@ -59,16 +65,13 @@ void JTextEdit::onSearchInText(QString str)
 
 void JTextEdit::onDataChanged()
 {
-    //save to file
-//    if (!m_filename.isEmpty() && !toPlainText().isEmpty())
-//        writeFile(BASE_PATH + m_filename, toPlainText().toStdString().c_str());
-
     if (!toPlainText().isEmpty())
-        emit toChangedData(toPlainText());
+        emit toChangedData(m_filename, toPlainText());
 }
 
 void JTextEdit::onFontResize(int fontsize)
 {
+    qDebug() << "JTextEdit::onFontResize()" << fontsize;
     setStyleSheet(FONT_STYLE_LIST(fontsize));
 }
 
@@ -91,43 +94,32 @@ void JTextEdit::dragMoveEvent(QDragMoveEvent *event)
      event->acceptProposedAction();
 }
 
-// READ file
 void JTextEdit::dropEvent(QDropEvent *event)
 {
     message(DEBUG, "JTextEdit::dropEvent()");
 
     const QMimeData *mimeData = event->mimeData();
-
-    QList<QUrl> urlList = mimeData->urls();
-
-    if (urlList.count() > 1 || !mimeData->hasUrls()) {
+    if (!mimeData->hasUrls()) {
         QMessageBox::critical(this, tr("Error"), tr("Only one file can be attached for each note"));
        return;
     }
 
-    QString url = urlList.at(0).path();
+    QList<QUrl> urlList = mimeData->urls();
 
-#ifdef Q_OS_WIN32
-    url = url.remove(0,1);
-#endif
+    emit toDropFileList(urlList);
 
-    QFileInfo fi(url);
-   /* if (textFiles.contains(fi.suffix())) {
-        QMessageBox msgBox;
-        msgBox.setText("Dropped text file.  Would you like to add as note or attachment ?");
-        QPushButton *noteButton = msgBox.addButton(tr("As Note"), QMessageBox::ActionRole);
-        QPushButton *attachButton = msgBox.addButton(tr("As Attachment"), QMessageBox::ActionRole);
-        QPushButton *cancelButton = msgBox.addButton(QMessageBox::Cancel);
-        msgBox.exec();
+    if (!m_filename.isEmpty() && urlList.count()==1) {
+        QString url = urlList.at(0).path();
 
-        if (msgBox.clickedButton() == (QAbstractButton *)noteButton)
-            updateData(readFile(fi.absoluteFilePath()));
+    #ifdef Q_OS_WIN32
+        url = url.remove(0,1);
+    #endif
 
-        if (msgBox.clickedButton() == (QAbstractButton *)cancelButton)
-            return;
+        QFileInfo fi(url);
+        QString fn = fi.absoluteFilePath();
+        setPlainText(readFile(fn));
+        emit toDropFilePath(fn);
     }
-*/
-    emit toDropFile(fi.absoluteFilePath());
 
     setBackgroundRole(QPalette::Dark);
     event->acceptProposedAction();
@@ -136,4 +128,16 @@ void JTextEdit::dropEvent(QDropEvent *event)
 void JTextEdit::dragLeaveEvent(QDragLeaveEvent *event)
 {
      event->accept();
+}
+
+void JTextEdit::mouseReleaseEvent(QMouseEvent *e)
+{
+  //  onFindText(textCursor().selectedText());
+
+    QTextEdit::mouseReleaseEvent(e);
+}
+
+void JTextEdit::mousePressEvent(QMouseEvent *e)
+{
+    QTextEdit::mousePressEvent(e);
 }

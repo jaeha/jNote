@@ -9,6 +9,8 @@ JListWidget::JListWidget(QWidget *parent) : QListWidget(parent)
     setSelectionBehavior(QAbstractItemView::SelectRows);
     setEditTriggers(QAbstractItemView::NoEditTriggers);
     setContextMenuPolicy(Qt::CustomContextMenu);
+    setSpacing(2);
+
    /*
        QVBoxLayout *vbox = new QVBoxLayout();
        vbox->addWidget(m_list);
@@ -17,11 +19,19 @@ JListWidget::JListWidget(QWidget *parent) : QListWidget(parent)
        setLayout(vbox);
    */
 
-   connect(this, SIGNAL(currentItemChanged(QListWidgetItem*, QListWidgetItem*)), \
+   connect(this, SIGNAL(currentItemChanged(QListWidgetItem*, QListWidgetItem*)),
            this, SLOT(onCurrentItemChanged(QListWidgetItem*, QListWidgetItem*)));
    connect(parent, SIGNAL(toFontResize(int)), this, SLOT(onFontResize(int)));
+   connect(this, SIGNAL(itemDoubleClicked(QListWidgetItem *)), this,
+           SLOT(onItemDoubleClicked(QListWidgetItem *)));
 }
 
+void JListWidget::onItemDoubleClicked(QListWidgetItem *item)
+{
+   // qDebug() << "JListWidget::onItemDoubleClicked()" << item->text() << item->data(LIST_KEY).toInt();
+    item->setFlags (item->flags () | Qt::ItemIsEditable);
+    emit toItemDoubleClicked(item->data(LIST_KEY).toInt(), item->text());
+}
 
 void JListWidget::onCurrentItemChanged(QListWidgetItem* newItem, QListWidgetItem* oldItem)
 {
@@ -30,19 +40,24 @@ void JListWidget::onCurrentItemChanged(QListWidgetItem* newItem, QListWidgetItem
     if (newItem == NULL) {
         emit toItemChanged(NO_DATA);
     } else {
-        message(DEBUG, "onCurrentItemChanged()", "item changed");
+      //  message(DEBUG, "onCurrentItemChanged()", "item changed");
         emit toItemChanged(newItem->data(LIST_KEY).toInt());
     }
 }
 
-QList<int> JListWidget::selectedData()
+void JListWidget::onFontResize(int fontsize)
 {
-    QList<int> selected;
-    foreach (QModelIndex index, selectedIndexes()){
-        selected.append(index.data(LIST_KEY).toInt());
-    }
+ //   message(DEBUG, "onFontResize()", QString("new font size: %1").arg(fontsize));
+    setStyleSheet(FONT_STYLE_LIST(fontsize));
+}
 
-    return selected;
+IdMap JListWidget::selectedData()
+{
+    IdMap map;
+    foreach (QListWidgetItem *item, selectedItems())
+        map.insert(item->data(LIST_KEY).toInt(), item->text());
+
+    return map;
 }
 
 void JListWidget::updateAllData(IdMap map)
@@ -70,25 +85,22 @@ void JListWidget::addData(int id, QString str)
     // add new item
     QListWidgetItem *item = new QListWidgetItem(str);
     item->setData(LIST_KEY, id);
+  //  item->setFlags(item->flags()|Qt::ItemIsUserCheckable);
+  //  item->setCheckState(Qt::Unchecked);
     addItem(item);
     setCurrentItem(item);
 }
 
 void JListWidget::removeSelectedData()
 {
-    message(DEBUG, "removeSelectedData()", QString("remove: %1").arg(currentRow()));
-    takeItem(currentRow());
+    qDebug() << "JListWidget::removeSelectedData()" << selectedItems();
+   // takeItem(currentRow());
+    qDeleteAll(selectedItems());
 }
 
 void JListWidget::updateCurrentData(QString str)
 {
     currentItem()->setText(str);
-}
-
-void JListWidget::onFontResize(int fontsize)
-{
- //   message(DEBUG, "onFontResize()", QString("new font size: %1").arg(fontsize));
-    setStyleSheet(FONT_STYLE_LIST(fontsize));
 }
 
 int JListWidget::currentID()

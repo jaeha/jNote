@@ -9,7 +9,7 @@ class JTextEdit : public QTextEdit
     Q_OBJECT
 
 public:
-    explicit JTextEdit(QString data="", QWidget *parent = nullptr);
+    explicit JTextEdit(QString filename="", QString data="", QWidget *parent = nullptr);
     void updateData(QString data, QString findStr="");
     void changeFontSize(int fontsize);
 
@@ -19,6 +19,9 @@ protected:
     void dragEnterEvent(QDragEnterEvent *event);
     void dropEvent(QDropEvent *event);
     void dragLeaveEvent(QDragLeaveEvent *event);
+    void mouseReleaseEvent(QMouseEvent *e);
+    void mousePressEvent(QMouseEvent *e);
+
 
 private:
     QColor jcolours[10] = {QColor("cyan"), QColor("magenta"), QColor("red"),
@@ -27,16 +30,19 @@ private:
                           QColor("blue")};
     QStringList textFiles = QStringList() << "txt" << "out" << "log" << "sh" << "pl" << "py" << "c" << "h";
     void findString(QString str, QColor color);
+    QString m_filename;
 
 signals:
-    void toChangedData(QString);
-    void toDropFile(QString);
+    void toChangedData(QString, QString);
+    void toDropFilePath(QString);
+    void toDropFileList(QList<QUrl>);
 
 public slots:
     void onDataChanged();
     void onFontResize(int);
     void onSearchOpen();
     void onSearchInText(QString);
+    void onFindText(QString);
 
 };
 

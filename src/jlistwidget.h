@@ -19,14 +19,15 @@ public:
     void removeSelectedData();
     void updateCurrentData(QString str);
     int currentID();
-    QList<int> selectedData();
+    IdMap selectedData();
 
 signals:
     void toItemChanged(int);
+    void toItemDoubleClicked(int, QString);
 
 public slots:
-    void onCurrentItemChanged(QListWidgetItem* oldItem, QListWidgetItem* newItem);
+    void onCurrentItemChanged(QListWidgetItem*, QListWidgetItem*);
     void onFontResize(int);
+    void onItemDoubleClicked(QListWidgetItem*);
 };
-
 #endif // JLISTWIDGET_H

@@ -11,7 +11,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationVersion(APP_VERSION);
 
     JNote w;
-    JDB db;
+  //  JDB db;
  /*   QStringList args = app.arguments();
     QString path = BASE_PATH;
     if (args.count() >= 2) {
@@ -19,7 +19,7 @@ int main(int argc, char *argv[])
     }
 */
     // create base path & db if it's not already exist
-    qDebug() <<"main()" <<BASE_PATH;
+  /*  qDebug() <<"main()" <<BASE_PATH;
     if (!QDir(BASE_PATH).exists()) {
             message(INFO, "DB", BASE_PATH + " will be created.");
             QDir().mkdir(BASE_PATH);
@@ -29,8 +29,7 @@ int main(int argc, char *argv[])
                 return 1;
             }
     }
-
-    w.open();
+*/
     w.show();
     return app.exec();
 }
