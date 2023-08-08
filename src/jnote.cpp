@@ -1,8 +1,3 @@
- #include "jnote.h"
-#include "jdb.h"
-#include "jattachbutton.h"
-#include "jattachdelbutton.h"
-#include "jsettingsdlg.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
@@ -18,63 +13,94 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QInputDialog>
-
-JDB db;
+#include "jnote.h"
+#include "jdb.h"
+#include "settingsdlg.h"
+#include "attachdlg.h"
+#include "categorydlg.h"
 
 JNote::JNote(QWidget *parent) : QWidget(parent)
 {
     m_findwords="";
-}
 
-void JNote::open()
-{
-    qDebug() << "JNote::open()";
-    gui();
-    readSettings();
-
+    // read settings
+    m_basepath = readSettings("basepath").toString();
     if (m_basepath.isEmpty())
         m_basepath = BASE_PATH;
+    m_attachpath = m_basepath + ATTACH_DIR + SP;
 
-    qDebug() <<"m_basepath=" <<m_basepath << dbfile();
+    // create dirs if they are not exist
+    QDir().mkdir(m_basepath);
+    QDir().mkdir(m_attachpath);
 
-    //create new db if it's not exist.
-    if (!QFile(dbfile()).exists()) {
-        db.createDB(dbfile());
-        QDir(m_basepath).mkdir(ATTACH_DIR);
-    }
-    else {
-        // remove existing backup file and copy
-        QString backupFile = dbfile() + ".bak";
-        removeFile(backupFile);
-        copyFile(dbfile(), backupFile);
-        db.open(dbfile());
-    }
+    qDebug() << "JNote() base path: " << m_basepath << ", attach pahe: " << m_attachpath;
 
-    // if the db is old, upgrade it.
-    message(DEBUG, "JDB", QString("open() DB version: %1").arg(db.dbversion()));
-    if (db.dbversion() < DB_VERSION) {
-        message(DEBUG, "JDB", "DB upgrade...");
-        db.close();
-        if (!db.upgrade(dbfile())) {
-            message(ERROR, "JNote", "db upgrade was failed");
-            return;
-        }
-        message(INFO, "JNote", "DB upgraded successfully!");
-        db.open(dbfile());
-    }
+    gui();
 
-    loadData();
+    // read settings
+    restoreGeometry(readSettings("geometry").toByteArray());
+    m_splitter->restoreState(readSettings("splitter").toByteArray());
+    int fontsize = readSettings("fontsize").toInt();
+    m_fontsize = (fontsize < FONT_DEFAULT_SIZE) ? FONT_DEFAULT_SIZE : fontsize;
+
     emit toFontResize(m_fontsize);
-    emit toChangeAttachpath(attachpath());
+
+}
+
+bool JNote::openDB()
+{
+    JDB db;
+    QString dbfile = m_basepath + DB_FILE;
+
+    if (QFile(dbfile).exists()) {
+        // remove existing backup file and copy
+        QString backupFile = dbfile + ".bak";
+        removeFile(backupFile);
+        copyFile(dbfile, backupFile);
+        if (db.open(dbfile)) {
+            int dbversion = db.dbversion();
+            message(DEBUG, "JDB", QString("open() DB version: %1").arg(dbversion));
+            if (dbversion < DB_VERSION && question("Upgarde", QString("Found DB version is %1 on %2. Do you want to upgrade?")
+                                                   .arg(dbversion).arg(m_basepath))) {
+                db.close();
+                int ret = 0;
+                switch (dbversion) {
+                    case 600:
+                        ret = db.upgrade700(dbfile);
+                    case 700:
+                        ret = db.upgrade800(dbfile);
+                        break;
+                }
+                if (!ret) {
+                    message(ERROR, "JNote", "db upgrade was failed");
+                    return false;
+                }
+
+                message(INFO, "JNote", QString("DB was upgraded to verson=%1 successfully!").arg(DB_VERSION));
+                db.open(dbfile);
+            }
+        } else
+            message(ERROR, "openDB", QString("Failed to open %1 !!").arg(dbfile));
+    } else {
+        //dbfile does not exist
+        if (!db.createDB(dbfile)) {
+            message(ERROR, "openDB", QString("Failed to create DB on %1 !!").arg(dbfile));
+            return false;
+        }
+        message(INFO, "openDB", QString("Successfully created new DB on %1 !!").arg(dbfile));
+    }
+
+    onLoadData();
+
+    return true;
 }
 
 void JNote::gui()
 {
-    m_splitter = new QSplitter();
-    m_text = new JTextEdit("",this);
     m_titlelist = new JListWidget(this);
-    m_category = new JCategoryCB(this);
-   // m_titlelist->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_text = new JTextEdit("", "", this);
+    m_splitter = new QSplitter(Qt::Horizontal);
+    m_category = new CategoryCB(this);
 
     QToolBar *toolbar = new QToolBar();
     menu(toolbar);
@@ -84,56 +110,38 @@ void JNote::gui()
     QVBoxLayout *lvbox = new QVBoxLayout();
     lvbox->addWidget(m_category);
     lvbox->addWidget(m_titlelist);
-    lvbox->setMargin(0);
-    lvbox->setSpacing(5);
+    lvbox->setSpacing(0);
+    lvbox->setContentsMargins(0,0,0,0);
     leftwg->setLayout(lvbox);
 
     // right panel
     QWidget *rightwg = new QWidget();
-   // QLineEdit *titleEd = new QLineEdit();
     QVBoxLayout *rvbox= new QVBoxLayout;
-  //  rvbox->addWidget(titleEd);
     rvbox->addWidget(m_text);
-    rvbox->setMargin(1);
-    rvbox->setSpacing(1);
+    rvbox->setSpacing(0);
+     rvbox->setContentsMargins(0,0,0,0);
     rightwg->setLayout(rvbox);
 
     m_splitter->addWidget(leftwg);
     m_splitter->addWidget(rightwg);
-
-    JAttachButton *attachbt = new JAttachButton(this);
-    JAttachDelButton *attachdelbt = new JAttachDelButton(this);
-    m_counter = new QLabel("");
-    m_counter->setMaximumHeight(attachdelbt->height());
-
-    QHBoxLayout *hbox = new QHBoxLayout();
-    hbox->addWidget(m_counter, 0, Qt::AlignLeft);
-    hbox->addStretch();
-    hbox->addWidget(attachdelbt, 0, Qt::AlignRight);
-    hbox->addWidget(attachbt, 0, Qt::AlignRight);
+    m_splitter->setHandleWidth(1);
 
     QVBoxLayout *layout = new QVBoxLayout;
     layout->addWidget(toolbar);
     layout->addWidget(m_splitter);
-    layout->setMargin(0);
-    layout->setSpacing(0);
-    layout->addLayout(hbox);
 
     resize(MAIN_DIALOG_SIZE);
 
     setLayout(layout);
 
-    connect(m_text, SIGNAL(toChangedData(QString)), this, SLOT(onTextChanged(QString)));
-    connect(m_text, SIGNAL(toDropFile(QString)), this, SLOT(onDropFile(QString)));
+    connect(m_text, SIGNAL(toChangedData(QString, QString)), this, SLOT(onNoteChanged(QString, QString)));
+    connect(m_text, SIGNAL(toDropFileList(QList<QUrl>)), this, SLOT(onDropFileList(QList<QUrl>)));
+    connect(m_titlelist, SIGNAL(toItemChecked(int,bool)), this, SLOT(onTitleChecked(int, bool)));
     connect(m_titlelist, SIGNAL(toItemChanged(int)), this, SLOT(onTitleSelected(int)));
     connect(m_titlelist, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(onTitleContextMenu(QPoint)));
     connect(m_category, SIGNAL(toItemChanged(int)), this, SLOT(onCategoryChanged(int)));
     connect(m_category, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(onCategoryContextMenu(QPoint)));
-
-    connect(attachdelbt, SIGNAL(toDeleteAttach()), this, SLOT(onDeleteAttach()));
-    connect(attachbt, SIGNAL(toAttachOpen(QString)), this, SLOT(onAttachOpen(QString)));
 }
-
 
 void JNote::menu(QToolBar *toolbar)
 {
@@ -158,6 +166,11 @@ void JNote::menu(QToolBar *toolbar)
     actSettings->setIcon(QIcon(":settings"));
     actSettings->setIconText(tr("Settings"));
 
+    m_actAttachment = new QAction(this);
+    m_actAttachment->setIcon(QIcon(":attachment"));
+    m_actAttachment->setIconText(tr("Attachment"));
+    m_actAttachment->setVisible(false);
+
     toolbar->addAction(actAdd);
     toolbar->addAction(actRemove);
     toolbar->addSeparator();
@@ -166,117 +179,121 @@ void JNote::menu(QToolBar *toolbar)
     toolbar->addSeparator();
     toolbar->addAction(actSettings);
     toolbar->addSeparator();
-    toolbar->addWidget(new QLabel(tr("Find:")));
+    toolbar->addWidget(new QLabel(tr("Search:")));
     toolbar->addWidget(m_find);
+    toolbar->addSeparator();
+
+    QMenu *menu = new QMenu(this);
+    m_actAttachment->setMenu(menu);
+    toolbar->addAction(m_actAttachment);
 
     connect(actAdd, SIGNAL(triggered()), this, SLOT(onAddNote()));
     connect(actRemove, SIGNAL(triggered()), this, SLOT(onRemoveNote()));
     connect(actBigger, SIGNAL(triggered()), this, SLOT(onFontBigger()));
     connect(actSmaller, SIGNAL(triggered()), this, SLOT(onFontSmaller()));
     connect(actSettings, SIGNAL(triggered()), this, SLOT(onSettings()));
-
     connect(m_find, SIGNAL(textChanged(QString)), this, SLOT(onFindNotes(QString)));
 }
 
-void JNote::loadData()
+void JNote::onLoadData()
 {
+    JDB db;
     m_titlelist->updateAllData(db.getNotes(0));
     m_category->updateAllData(db.getCategories());
+
+    qDebug() << "LoadData()";
 }
 
 void JNote::onSettings()
 {
     message(DEBUG, "JNote", "onSettings()");
 
-    JSettingsDlg *dlg = new JSettingsDlg(this, m_basepath);
+    SettingsDlg *dlg = new SettingsDlg(m_basepath, this);
     dlg->show();
 
-    connect(dlg, SIGNAL(toImportData(QString)), this, SLOT(onImportData(QString)));
     connect(dlg, SIGNAL(toChangeBasepath(QString)), this, SLOT(onChangeBasepath(QString)));
+    connect(dlg, SIGNAL(finished(int)), this, SLOT(onLoadData(int)));
 }
 
-void JNote::onImportData(QString path)
+void JNote::onAttachDlg()
 {
-    // category will not be imported, and all data will be under new category, 'imported'.
+    int nid = m_titlelist->currentID();
+    AttachDlg *dlg = new AttachDlg(nid, m_attachpath, this);
 
-    QString importDB = path + SP + DB_FILE;
-    if (!QFile(importDB).exists()) {
-        message(ERROR, "JNote", importDB + " is not found!");
-        return;
-    }
+    //QPoint pos =  m_text->mapToGlobal(QPoint(m_text->geometry().y()+950, 0));
+    //dlg->move(pos);
+    dlg->show();
 
-    if (copyFile(dbfile(), dbfile() + ".before_import"))
-        message(DEBUG, "JDB", "import() create backup:" + dbfile() + ".before_import");
-
-    if (db.import(importDB)) {
-        copyFile(path + SP + ATTACH_DIR, m_basepath + ATTACH_DIR);
-        loadData();
-        message(INFO, "JNote", "Import was completed successfully!");
-    }
-    else
-        message(ERROR, "JNote", "onImportData() import was failed!");
+    connect(dlg, SIGNAL(finished(int)), this, SLOT(onCheckAttachment(int)));
 }
 
 void JNote::onChangeBasepath(QString path)
 {
-    m_basepath = path;
-    message(INFO, "onChangeBasepath", "Changed base directory to " + path + " . Please copy all files into new directory and resatrt JNote!");
-}
-
-void JNote::onDropFile(QString path)
-{
-    message(DEBUG, "JNote()::onDropFile: ", path);
-
-    QFileInfo fi(path);
-    QString newfile = attachpath() + SP + QString("%1_%2").arg(m_titlelist->currentID()).arg(fi.fileName());
-
-    if (QFile::copy(path, newfile)) {
-        QFileInfo fi2(newfile);
-        QString fn = fi2.fileName();
-        emit toAttachFile(fn);
-        db.setAttach(m_titlelist->currentID(), fn);
-    } else {
-        message(ERROR, "JNote", QString("Failed to copy file from %1 to %2").arg(path).arg(newfile));
+    if (m_basepath != path) {
+        m_basepath = path;
+        writeSettings("basepath", m_basepath);
+        message(INFO, "onChangeBasepath", "Base Directory has been changed to " + path + " . Please restart JNote!");
+        exit(1);
     }
 }
 
-void JNote::onAttachOpen(QString path)
+void JNote::onDropFileList(QList<QUrl> urlList)
 {
-    message(DEBUG, "onAttachOpen()", path);
-    QDesktopServices::openUrl(QUrl("file:///" + path, QUrl::TolerantMode));
-}
-
-void JNote::onDeleteAttach()
-{
-    message(DEBUG,"JNote", "onDeleteAttach()");
+    qDebug() << "JNote::onDropFileList()" << urlList;
 
     int id = m_titlelist->currentID();
-    QString fn = attachpath() + db.getAttach(id);
-    qDebug() << "file remove: " << fn;
-    QFile f(fn);
-    if (f.remove()) {
-        db.setAttach(id, "");
-        emit toHideAttachIcons();
-    } else
-        message(ERROR, "Remove attachment", "Failed to remove Attachment file, " + fn);
+    if (id < 0) {
+        message(ERROR, "onDropFileList", "No selected note!");
+        return;
+    }
+
+    JDB db;
+    QString path;
+    QUrl url;
+    foreach (url, urlList) {
+        path = url.path();
+
+#ifdef Q_OS_WIN32
+    path = path.remove(0,1);
+#endif
+        QFileInfo fi(path);
+        QString newfile = m_attachpath + QString("%1_%2").arg(m_titlelist->currentID()).arg(fi.fileName());
+
+        message(INFO, "Attachment", "Attaching " + newfile);
+
+        if (QFile::copy(path, newfile)) {
+            QFileInfo fi2(newfile);
+            QString fn = fi2.fileName();
+            int id = m_titlelist->currentID();
+            db.insertAttachment(fn, id);
+        } else {
+            message(ERROR, "JNote", QString("Failed to copy file from %1 to %2").arg(path).arg(newfile));
+        }
+    } //foreach
+
+    onCheckAttachment();
 }
+
 
 void JNote::onTitleContextMenu(const QPoint &pos)
 {
     message(DEBUG, "onTitleContextMenu()", "move items to different category");
 
-   if (m_titlelist->currentID() > 0) {
+    JDB db;
+    if (m_titlelist->currentID() > 0) {
         // Handle global position
         QPoint globalPos = m_titlelist->mapToGlobal(pos);
         // Create menu and insert some actions
-        QMenu *menu = new QMenu();
+        QMenu *menu = new QMenu();      
+        menu->addAction(getMenuTitleWidget("Change Category"));
 
         IdMapIterator i(db.getCategories());
         while (i.hasNext()) {
             i.next();
-            if (i.value() == m_category->currentText()) // skipped current category!
+            QString text = i.value().at(0);
+            if (text == m_category->currentText()) // skipped current category!
                 continue;
-            QAction *action = new QAction(i.value());
+            QAction *action = new QAction(text);
             action->setData(i.key());
             menu->addAction(action);
         }
@@ -298,7 +315,7 @@ void JNote::onCategoryContextMenu(const QPoint &pos)
     QMenu *menu = new QMenu();
     menu->addSection("Category");
     menu->addAction("New", this, SLOT(onNewCategory()));
-    menu->addAction("Rename", this , SLOT(onRenameCategory()));
+    menu->addAction("Modify", this , SLOT(onModifyCategory()));
     menu->addAction("Delete", this, SLOT(onDeleteCategory()));
 
     // Show context menu at handling position
@@ -309,58 +326,50 @@ void JNote::onCategoryChanged(int cid)
 {
     message(DEBUG, "onCategoryChanged()", "start..");
 
+    JDB db;
     m_text->updateData("");
-    m_titlelist->updateAllData(db.findNotes(m_findwords, cid));
+    m_titlelist->updateAllData(db.findNotes(m_findwords, cid), db.getCategoryType(cid)==TASK_TYPE);
 
-    m_counter->setText(QString(" Records: %1").arg(db.counterNote(cid)));
+  //  m_counter->setText(QString(" Records: %1").arg(db.counterNote(cid)));
 }
 
 void JNote::onTitleChangeCategory(QAction *action)
 {
     message(DEBUG, "onTitleChangeCategory()", QString("action->text():%1").arg(action->text()));
 
-    foreach (int nid, m_titlelist->selectedData()) {
-       db.setNoteCategory(nid,  action->data().toInt());
+    JDB db;
+    IdMapIterator i(m_titlelist->selectedData());
+    while (i.hasNext()) {
+       i.next();
+       db.setNoteCategory(i.key(),  action->data().toInt());
        m_titlelist->removeSelectedData(); // remove from title list
     }
 }
 
 void JNote::onNewCategory()
 {
-    bool ok;
-    QString newCategory = QInputDialog::getText(this, tr("Cagtegory"),
-                                             tr("New Category:"), QLineEdit::Normal,
-                                             "", &ok);
-    if (ok && !newCategory.isEmpty()) {
-        int cid = db.insertNewCategory(newCategory);
-    }
+    JDB db;
+    CategoryDlg *dlg = new CategoryDlg(-1, this);
+    dlg->show();
 
-    m_category->updateAllData(db.getCategories());
-    m_category->setCurrentText(newCategory);
+    connect(dlg, SIGNAL(accepted()), this, SLOT(onLoadData()));
 }
 
-void JNote::onRenameCategory()
+void JNote::onModifyCategory()
 {
-    bool ok;
-    QString renCategory = QInputDialog::getText(this, tr("Cagtegory"),
-                                            QString("Rename Category(%1):").arg(m_category->currentText()), \
-                                            QLineEdit::Normal,"", &ok);
+    JDB db;
+    CategoryDlg *dlg = new CategoryDlg(m_category->currentID(), this);
+    dlg->show();
 
-    if (ok && !renCategory.isEmpty()) {
-        int cid = m_category->currentData().toInt();
-        db.setCategory(cid, renCategory);
-        db.setNoteCategory(m_titlelist->currentID(), cid);
-    }
-
-    m_category->updateAllData(db.getCategories());
-    m_category->setCurrentText(renCategory);
+    connect(dlg, SIGNAL(accepted()), this, SLOT(onLoadData()));
 }
 
 void JNote::onDeleteCategory()
 {
+    JDB db;
     int cid = m_category->currentData().toInt();
     if (db.getNotes(cid).size() > 0) {
-        message(ERROR, "Delete Category", "Unable to delete Category if there is any note!");
+        message(ERROR, "Delete Category", "Unable to delete category if there is existing notes!");
         return;
     }
 
@@ -372,63 +381,96 @@ void JNote::onDeleteCategory()
 
 void JNote::onAddNote()
 {
-    message(DEBUG, "onAddData()", "adding data..");
+    message(DEBUG, "onAddNote()", "adding note.");
+    qDebug() << m_category->currentIndex();
 
-    int nid = db.insertEmptyNote();
-    m_titlelist->addData(nid, "");
-    db.setNoteCategory(nid, m_category->currentID());
+    if (m_category->currentIndex()<0) {
+        message(ERROR, "onAddNote()", "Category is not selected");
+        return;
+    }
+
+    JDB db;
+    int cid = m_category->currentID();
+    int nid = db.insertNewNote(cid);
+    int ctype = db.getCategoryType(cid);
+    m_titlelist->addData(nid, "", ctype == TASK_TYPE);
+  //  db.setNoteCategory(nid, cid);
+
+    //For journal
+    if (ctype == JORUNAL_TYPE) {
+        m_text->append(QDateTime::currentDateTime().toString(DATE_LONG));
+        m_text->append("");
+        m_text->append("");
+    }
+
     m_text->setFocus();
 }
 
+void JNote::onTitleChecked(int id, bool isChecked)
+{
+    message(DEBUG, "onTitleChecked()", QString("active: %1").arg(isChecked));
+    JDB db;
+    db.setNoteChecked(id, isChecked);
+}
 void JNote::onTitleSelected(int id)
 {
     message(DEBUG, "onTitleSelected()", QString("id = %1").arg(id));
 
-    if (id == NO_DATA) {
+    JDB db;
+
+   if (id == NO_DATA) {
         m_text->updateData("");
         return;
     }
 
     m_text->updateData(db.getNote(id), m_find->text());
-    QString f = db.getAttach(id);
-    if (!f.isEmpty()) {
-        toAttachFile(f);
-    }
-    else
-        emit toHideAttachIcons();
+    m_text->setReadOnly(true);
+
+    onCheckAttachment(id);
 }
 
 
-void JNote::onTextChanged(QString text)
+void JNote::onNoteChanged(QString filename, QString data)
 {
-    m_titlelist->updateCurrentData(FIRSTLINE(text));
-    db.setNote(m_titlelist->currentID(), text);
+    JDB db;
+    m_titlelist->updateCurrentData(FIRSTLINE(data));
+    db.setNote(m_titlelist->currentID(), data);
 }
 
 void JNote::onRemoveNote()
 {
     message(DEBUG, "onRemoveData()", "removing data..");
 
-    int id = m_titlelist->currentID();
-    if (id == NO_DATA) {
+    JDB db;
+    IdMap map = m_titlelist->selectedData();
+
+    if (map.isEmpty()) {
         message(ERROR, "Remove Note", "No data was selected!");
         return;
     }
 
-    int button = QMessageBox::question(this, tr("Question"),
-                         tr("Do you really want to delete the selected note ?"),
-                         QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
-    if (button == QMessageBox::Yes) {
-        if (!db.getAttach(id).isEmpty())
-            onDeleteAttach();
-        if (db.removeNote(id)) {
-            m_titlelist->removeSelectedData();
-            if (!db.getAttach(id).isEmpty())
-                onDeleteAttach();
+    if (!question("Delete Notes", QString("%1 notes are selected. Do you really want to delete them?").arg(map.count())))
+                 return;
+
+    qDebug() << map;
+
+    IdMapIterator i(map);
+    while (i.hasNext()) {
+        i.next();
+        // remove attachments
+        IdMap attMap = db.getAllAttachment(i.key());
+        if (!attMap.isEmpty()) {
+            message(ERROR, "onRemoveNote", QString("Unable to delete Note ID:%1 as there is attchments.").arg(i.key()));
+            return;
         }
-        else
+
+        // remove DB
+        if (!db.removeNote(i.key())) {
             message(ERROR, "Remove Note", "Failed to remove note!");
+            return;
+        }
     }
+    m_titlelist->removeSelectedData();
 }
 
 void JNote::onFontBigger()
@@ -445,54 +487,65 @@ void JNote::onFontSmaller()
     emit toFontResize(m_fontsize);
 }
 
-/*
-void JNote::onOpen()
-{
-    QString dir = QFileDialog::getExistingDirectory(this, tr("Open Directory"),
-                                 QDir::homePath(),
-                                 QFileDialog::ShowDirsOnly
-                                 | QFileDialog::DontResolveSymlinks);
-
-#ifdef Q_OS_WIN32
-    dir = dir.remove(0,1);
-#endif
-
-    doOpen(dir);
-}
-*/
-
 void JNote::onFindNotes(QString words)
 {
+    JDB db;
     m_findwords = words;
     m_text->updateData("");
     m_titlelist->updateAllData(db.findNotes(words, m_category->currentID()));
 }
 
-void JNote::writeSettings()
+void JNote::onCheckAttachment(int res)
 {
-    QSettings settings(COMPANY, APP_TITLE);
+    JDB db;
+    QMenu *menu = new QMenu();
+    int nid = m_titlelist->currentID();
 
-    settings.beginGroup("JNote");
-    settings.setValue("geometry", saveGeometry());
-    settings.setValue("splitter", m_splitter->saveState());
-    settings.setValue("fontsize", m_fontsize);
-    settings.setValue("basepath", m_basepath);
-    settings.endGroup();
+    IdMap map = db.getAllAttachment(nid);
+    if (map.count() <= 0) {
+        m_actAttachment->setVisible(false);
+        return;
+    }
+
+    IdMapIterator i(map);
+    while (i.hasNext()) {
+        i.next();
+        qDebug() << i.key() << i.value().at(0);
+        QAction *act = new QAction(i.value().at(0));
+        act->setData(i.key());
+        menu->addAction(act);
+    }
+    menu->addAction("More..", this, SLOT(onAttachDlg()));
+    m_actAttachment->setMenu(menu);
+    m_actAttachment->setVisible(true);
+
+    connect(menu, SIGNAL(triggered(QAction*)), this, SLOT(onAttachOpen(QAction *)));
 }
 
-void JNote::readSettings()
+void JNote::onAttachOpen(QAction *act)
 {
-    QSettings settings(COMPANY, APP_TITLE);
-    settings.beginGroup("JNote");
-    restoreGeometry(settings.value("geometry").toByteArray());
-    m_splitter->restoreState(settings.value("splitter").toByteArray());
-    int fontsize = settings.value("fontsize").toInt();
-    m_fontsize = (fontsize < FONT_DEFAULT_SIZE) ? FONT_DEFAULT_SIZE : fontsize;
-    m_basepath = settings.value("basepath").toString();
-    settings.endGroup();
+    message(DEBUG, "onAttachOpen()", m_attachpath + act->text());
+    QDesktopServices::openUrl(QUrl("file:///" + m_attachpath + act->text(), QUrl::TolerantMode));
 }
 
 JNote::~JNote()
 {
-    writeSettings();
+    writeSettings("geometry", saveGeometry());
+    writeSettings("splitter", m_splitter->saveState());
+    writeSettings("fontsize", m_fontsize);
+    writeSettings("basepath", m_basepath);
 }
+
+/// functions
+
+QWidgetAction* JNote::getMenuTitleWidget(QString title)
+{
+    QWidgetAction *wg = new QWidgetAction(this);
+    QLabel *lb = new QLabel(title);
+    lb->setAlignment(Qt::AlignCenter);
+    lb->setStyleSheet("QLabel {color:gray;}");
+    wg->setDefaultWidget(lb);
+    return wg;
+}
+
+

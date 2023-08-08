@@ -1,15 +1,17 @@
 #ifndef JNOTE_H
 #define JNOTE_H
 
-#include "global.h"
-#include "jtextedit.h"
-#include "jlistwidget.h"
-#include "jcategorycb.h"
 #include <QWidget>
 #include <QToolBar>
 #include <QSplitter>
 #include <QListWidget>
 #include <QVBoxLayout>
+#include <QWidgetAction>
+#include "global.h"
+#include "jtextedit.h"
+#include "jlistwidget.h"
+#include "categorycb.h"
+#include "jtabwidget.h"
 
 class JNote : public QWidget
 {
@@ -17,56 +19,55 @@ class JNote : public QWidget
 
 public:
     JNote(QWidget *parent = 0);
-    void open();
-    QString dbfile() { return m_basepath + DB_FILE; }  //
-    QString attachpath() { return m_basepath + ATTACH_DIR + SP; }
+    bool openDB();
     ~JNote();
 
 private:
     JListWidget *m_titlelist;
     JTextEdit *m_text;
-    JCategoryCB *m_category;
+    CategoryCB *m_category;
     QSplitter *m_splitter;
     QLineEdit *m_find;
     QLabel *m_counter;
     int m_fontsize;
     QString m_basepath;
+    QString m_attachpath;
     QString m_findwords;
+    QAction *m_actAttachment;
 
     void gui();
-    void loadData();
     void menu(QToolBar *toolbar);
-    void writeSettings();
-    void readSettings();
-
+    QWidgetAction* getMenuTitleWidget(QString title);
 
 signals:
     void toFontResize(int);
-    void toAttachFile(QString);
-    void toHideAttachIcons();
-    void toChangeAttachpath(QString);
+   // void toAttachFile(QString);
+   // void toHideAttachIcons();
+   // void toChangeAttachpath(QString);
 
 private slots:
-    void onDropFile(QString);
-    void onTitleContextMenu(const QPoint&);
-    void onCategoryContextMenu(const QPoint &pos);
-    void onTitleSelected(int id);
-    void onTextChanged(QString);
+    void onNoteChanged(QString, QString);
     void onAddNote();
     void onRemoveNote();
-    void onDeleteAttach();
-    void onAttachOpen(QString);
+    void onFindNotes(QString);
+    void onDropFileList(QList<QUrl>);
+    void onChangeBasepath(QString);
+    void onTitleContextMenu(const QPoint&);
+    void onTitleChecked(int id, bool isChecked);
+    void onTitleSelected(int id);
+    void onTitleChangeCategory(QAction*);
+    void onNewCategory();
+    void onCategoryContextMenu(const QPoint &pos);
+    void onDeleteCategory();
+    void onModifyCategory();
+    void onCategoryChanged(int cid);
     void onFontBigger();
     void onFontSmaller();
     void onSettings();
-    void onFindNotes(QString);
-    void onNewCategory();
-    void onDeleteCategory();
-    void onRenameCategory();
-    void onTitleChangeCategory(QAction*);
-    void onCategoryChanged(int cid);
-    void onImportData(QString);
-    void onChangeBasepath(QString);
+    void onLoadData();
+    void onAttachDlg();
+    void onCheckAttachment(int nid=-1);
+    void onAttachOpen(QAction*);
 };
 
 #endif // JNOTE_H

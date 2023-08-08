@@ -4,8 +4,9 @@
         <file alias="remove">images/remove.png</file>
         <file alias="bigger">images/bigger.png</file>
         <file alias="smaller">images/smaller.png</file>
-        <file alias="delete_attach">images/delete_attach.png</file>
         <file alias="settings">images/settings.png</file>
         <file alias="folder">images/folder.png</file>
+        <file alias="import">images/import.png</file>
+        <file alias="attachment">images/attachment.png</file>
     </qresource>
 </RCC>
