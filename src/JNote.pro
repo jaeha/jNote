@@ -24,30 +24,34 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 
 SOURCES += \
-    jcategorycb.cpp \
+    attachdlg.cpp \
+    categorycb.cpp \
+    categorydlg.cpp \
     jtabledlg.cpp \
+    jtoolbutton.cpp \
         main.cpp \
         jnote.cpp \
     jdb.cpp \
     jtextedit.cpp \
     jlistwidget.cpp \
-    jattachbutton.cpp \
-    jattachdelbutton.cpp \
-    jsearchdlg.cpp \
-    jsettingsdlg.cpp
+    searchdlg.cpp \
+    settingsdlg.cpp \
+    jtabwidget.cpp
 
 HEADERS += \
-    jcategorycb.h \
+    attachdlg.h \
+    categorycb.h \
+    categorydlg.h \
         jnote.h \
     global.h \
     jdb.h \
     jtabledlg.h \
     jtextedit.h \
     jlistwidget.h \
-    jattachbutton.h \
-    jattachdelbutton.h \
-    jsearchdlg.h \
-    jsettingsdlg.h
+    jtoolbutton.h \
+    searchdlg.h \
+    settingsdlg.h \
+    jtabwidget.h
 
 RESOURCES += \
     resources.qrc
